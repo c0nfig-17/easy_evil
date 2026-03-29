@@ -43,13 +43,34 @@ EOF
 # =============================================================================
 # CHECKLIST
 # =============================================================================
+_fix_resolv_conf() {
+    # If /etc/resolv.conf only has 127.0.0.x nameservers (systemd stub) and
+    # systemd-resolved is not running, DNS is broken — write real nameservers.
+    if grep -qE '^nameserver\s+127\.' /etc/resolv.conf 2>/dev/null && \
+       ! grep -qE '^nameserver\s+(?!127\.)' /etc/resolv.conf 2>/dev/null && \
+       ! systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+        info "Detected broken DNS (resolv.conf points to stopped stub resolver)"
+        info "Writing fallback nameservers to /etc/resolv.conf…"
+        printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf
+        ok "DNS fixed (8.8.8.8 / 1.1.1.1)"
+    fi
+}
+
 run_checklist() {
     echo -e "\n${BOLD}━━━ Pre-flight Checklist ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     local errors=0
 
-    # 0. Network connectivity (required for downloads)
-    if curl -fsSL --max-time 5 https://go.dev > /dev/null 2>&1; then
-        ok "Network connectivity OK"
+    # 0a. Auto-repair DNS if systemd-resolved was previously stopped by this script
+    _fix_resolv_conf
+
+    # 0b. Network connectivity (required for downloads)
+    if ping -c1 -W3 8.8.8.8 > /dev/null 2>&1; then
+        if curl -fsSL --max-time 8 https://go.dev > /dev/null 2>&1; then
+            ok "Network connectivity OK (IP + DNS)"
+        else
+            warn "IP reachable but DNS resolution failing — check /etc/resolv.conf"
+            (( errors++ )) || true
+        fi
     else
         warn "No internet connectivity detected — downloads will fail"
         (( errors++ )) || true
@@ -101,6 +122,9 @@ run_checklist() {
             info "Stopping and disabling systemd-resolved…"
             systemctl stop systemd-resolved
             systemctl disable systemd-resolved
+            # Restore DNS: resolv.conf was pointing to the now-dead stub resolver
+            printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf
+            ok "DNS nameservers set to 8.8.8.8 / 1.1.1.1"
             sleep 1
             if _check_port53; then
                 warn "Port 53 still in use after stopping systemd-resolved"
