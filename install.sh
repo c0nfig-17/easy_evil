@@ -47,6 +47,14 @@ run_checklist() {
     echo -e "\n${BOLD}━━━ Pre-flight Checklist ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     local errors=0
 
+    # 0. Network connectivity (required for downloads)
+    if curl -fsSL --max-time 5 https://go.dev > /dev/null 2>&1; then
+        ok "Network connectivity OK"
+    else
+        warn "No internet connectivity detected — downloads will fail"
+        (( errors++ )) || true
+    fi
+
     # 1. RAM >= 1 GB available
     local ram_available_kb
     ram_available_kb=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
@@ -151,14 +159,17 @@ install_packages() {
     apt-get update -qq
     ok "Package lists updated"
 
-    local pkgs=(git curl make tmux)
+    local pkgs=(git curl build-essential tmux net-tools lsof)
     for pkg in "${pkgs[@]}"; do
         if dpkg -s "$pkg" &>/dev/null; then
             ok "${pkg} already installed — skipping"
         else
             info "Installing ${pkg}…"
-            apt-get install -y -qq "$pkg"
-            ok "${pkg} installed"
+            if apt-get install -y -qq "$pkg"; then
+                ok "${pkg} installed"
+            else
+                fail "Could not install ${pkg} — check network/apt sources"
+            fi
         fi
     done
 }
