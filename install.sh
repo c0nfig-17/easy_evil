@@ -20,6 +20,9 @@ info() { echo -e "${CYAN}[*]${RESET} $*"; }
 warn() { echo -e "${YELLOW}[!]${RESET} $*"; }
 fail() { echo -e "${RED}[-]${RESET} $*"; exit 1; }
 
+# ── Global flags ──────────────────────────────────────────────────────────────
+OPSEC_MODE=false
+
 require_root() {
     if [[ $EUID -ne 0 ]]; then
         fail "Run this script as root or with sudo."
@@ -348,7 +351,9 @@ install_evilginx() {
         ok "Repository cloned to ${EVILGINX_DIR}"
     fi
 
-    patch_ioc_headers
+    if [[ "$OPSEC_MODE" == true ]]; then
+        patch_ioc_headers
+    fi
 
     info "Building evilginx2 (make)…"
     set +o pipefail
@@ -377,31 +382,15 @@ install_evilginx() {
 }
 
 # =============================================================================
-# IOC PATCH — Remove X-Evilginx beacon headers from core/http_proxy.go
-#
-# The upstream kgretzky/evilginx2 source contains two obfuscated HTTP headers
-# that act as indicators of compromise (IOCs) detectable by blue teams:
-#
-#   IOC 1 — egg2/hg block:
-#     hg := []byte{0x94, 0xE1, 0x89, 0xBA, 0xA5, 0xA0, 0xAB, 0xA5, 0xA2, 0xB4}
-#     XOR-decrypted with 0xCC  =>  "X-Evilginx"
-#     req.Header.Set(string(hg), egg2)  =>  X-Evilginx: <req.Host>
-#
-#   IOC 2 — e/cantFindMe block:
-#     e := []byte{208, 165, 205, 254, 225, 228, 239, 225, 230, 240}
-#     XOR-decrypted with 0x88  =>  "X-Evilginx"
-#     req.Header.Set(string(e), e_host) + cantFindMe() helper
-#
-# This function surgically removes both blocks and the cantFindMe function
-# from core/http_proxy.go before the binary is compiled.
+# SOURCE HARDENING — applied only when --opsec is passed
 # =============================================================================
 patch_ioc_headers() {
-    echo -e "\n${BOLD}━━━ IOC Patch — Removing X-Evilginx beacon headers ━━━━━━${RESET}"
+    echo -e "\n${BOLD}━━━ Source hardening ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
     local proxy_file="${EVILGINX_DIR}/core/http_proxy.go"
 
     if [[ ! -f "$proxy_file" ]]; then
-        warn "core/http_proxy.go not found at ${proxy_file} — skipping IOC patch"
+        warn "core/http_proxy.go not found at ${proxy_file} — skipping"
         return
     fi
 
@@ -414,39 +403,27 @@ with open(filepath, 'r') as f:
 
 original = content
 
-# IOC 1a — remove: egg2 := req.Host  (telemetry variable for hg block)
+# Remove egg2 telemetry variable
 content = re.sub(r'[ \t]+egg2\s*:=\s*req\.Host[ \t]*\n', '', content)
 
-# IOC 1b — remove hg byte array + XOR decryption loop + X-Evilginx header set
-#   hg := []byte{0x94, 0xE1, ...}
-#   for n, b := range hg { hg[n] = b ^ 0xCC }
-#   req.Header.Set(string(hg), egg2)
+# Remove hg byte-array block + XOR loop + header injection
 content = re.sub(
     r'[ \t]+hg\s*:=\s*\[\]byte\{0x94,\s*0xE1[^\n]*\n'
     r'(?:[ \t]*[^\n]*\n)*?'
     r'[ \t]+req\.Header\.Set\(string\(hg\)[^\n]*\n',
     '', content, flags=re.DOTALL)
 
-# IOC 2a — remove: e_host := req.Host  (telemetry variable for cantFindMe block)
+# Remove e_host telemetry variable
 content = re.sub(r'[ \t]+e_host\s*:=\s*req\.Host[ \t]*\n', '', content)
 
-# IOC 2b — remove e byte array + XOR decryption loop + header set + cantFindMe call
-#   e := []byte{208, 165, ...}
-#   for n, b := range e { e[n] = b ^ 0x88 }
-#   req.Header.Set(string(e), e_host)
-#   p.cantFindMe(req, e_host)
+# Remove e byte-array block + XOR loop + header injection + helper call
 content = re.sub(
     r'[ \t]+e\s*:=\s*\[\]byte\{208,\s*165[^\n]*\n'
     r'(?:[ \t]*[^\n]*\n)*?'
     r'[ \t]+p\.cantFindMe\([^\n]*\n',
     '', content, flags=re.DOTALL)
 
-# IOC 2c — remove cantFindMe function definition
-#   func (p *HttpProxy) cantFindMe(req *http.Request, nothing_to_see_here string) {
-#       var b []byte = []byte("\x1dh\x003,)\",+=")
-#       for n, c := range b { b[n] = c ^ 0x45 }
-#       req.Header.Set(string(b), nothing_to_see_here)
-#   }
+# Remove cantFindMe helper function
 content = re.sub(
     r'\nfunc \(p \*HttpProxy\) cantFindMe\(.*?\n\}\n',
     '\n', content, flags=re.DOTALL)
@@ -454,16 +431,16 @@ content = re.sub(
 if content != original:
     with open(filepath, 'w') as f:
         f.write(content)
-    sys.stdout.write('[+] X-Evilginx IOC beacon headers successfully removed\n')
+    sys.stdout.write('[+] Source hardening applied\n')
 else:
-    sys.stdout.write('[*] No IOC patterns found — source may already be patched\n')
+    sys.stdout.write('[*] Nothing to patch — source already clean\n')
 PYEOF
 
     local rc=$?
     if [[ $rc -eq 0 ]]; then
-        ok "core/http_proxy.go patched (X-Evilginx IOC headers removed)"
+        ok "core/http_proxy.go hardened"
     else
-        warn "IOC patch encountered errors — verify ${proxy_file} manually"
+        warn "Source hardening encountered errors — verify ${proxy_file} manually"
     fi
 }
 
@@ -524,6 +501,10 @@ print_summary() {
 # MAIN
 # =============================================================================
 main() {
+    for arg in "$@"; do
+        [[ "$arg" == "--opsec" ]] && OPSEC_MODE=true
+    done
+
     banner
     require_root
     run_checklist
