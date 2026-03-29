@@ -183,17 +183,31 @@ install_packages() {
     apt-get update -qq
     ok "Package lists updated"
 
+    # Suppress needrestart and dpkg interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+    export NEEDRESTART_MODE=a
+
     local pkgs=(git curl build-essential tmux net-tools lsof)
     for pkg in "${pkgs[@]}"; do
         if dpkg -s "$pkg" &>/dev/null; then
             ok "${pkg} already installed — skipping"
         else
             info "Installing ${pkg}…"
-            if apt-get install -y -qq "$pkg"; then
-                ok "${pkg} installed"
-            else
+            set +o pipefail
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+                -o "Dpkg::Options::=--force-confdef" \
+                -o "Dpkg::Options::=--force-confold" \
+                "$pkg" 2>&1 \
+                | grep -E '^(Selecting|Preparing|Unpacking|Setting up|Processing)' \
+                | while IFS= read -r line; do
+                    echo -e "    ${CYAN}│${RESET} ${line}"
+                  done
+            local apt_status=${PIPESTATUS[0]}
+            set -o pipefail
+            if [[ $apt_status -ne 0 ]]; then
                 fail "Could not install ${pkg} — check network/apt sources"
             fi
+            ok "${pkg} installed"
         fi
     done
 }
