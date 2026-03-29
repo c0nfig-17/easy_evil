@@ -274,13 +274,16 @@ install_evilginx() {
     ok "Evilginx2 built successfully"
 
     local binary="${EVILGINX_DIR}/evilginx"
-    if [[ -x "$binary" ]]; then
-        ok "Binary ready at ${binary}"
-    else
+    if [[ ! -x "$binary" ]]; then
         # Some builds output to build/
         binary=$(find "$EVILGINX_DIR" -maxdepth 3 -name "evilginx" -type f | head -1)
-        [[ -n "$binary" ]] && ok "Binary ready at ${binary}" || \
-            warn "Binary not found — check build output above"
+    fi
+
+    if [[ -n "$binary" && -f "$binary" ]]; then
+        chmod 700 "$binary"
+        ok "Binary ready at ${binary} (chmod 700)"
+    else
+        warn "Binary not found — check build output above"
     fi
 }
 
