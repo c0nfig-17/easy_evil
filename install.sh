@@ -375,6 +375,43 @@ install_evilginx() {
 }
 
 # =============================================================================
+# BLACKLIST — populate /root/.evilginx/blacklist.txt
+# =============================================================================
+BLACKLIST_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/blacklist.txt"
+EVILGINX_BLACKLIST="/root/.evilginx/blacklist.txt"
+
+apply_blacklist() {
+    echo -e "\n${BOLD}━━━ Blacklist — ${EVILGINX_BLACKLIST} ━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+
+    if [[ ! -f "$BLACKLIST_SRC" ]]; then
+        warn "blacklist.txt not found next to install.sh — skipping"
+        return
+    fi
+
+    local dir
+    dir="$(dirname "$EVILGINX_BLACKLIST")"
+
+    if [[ ! -d "$dir" ]]; then
+        info "Creating directory ${dir}…"
+        mkdir -p "$dir"
+    fi
+
+    if [[ -f "$EVILGINX_BLACKLIST" ]]; then
+        info "Merging IPs into existing ${EVILGINX_BLACKLIST}…"
+        # Append only IPs not already present, then sort -u in place
+        local tmp
+        tmp="$(mktemp)"
+        sort -u "$EVILGINX_BLACKLIST" "$BLACKLIST_SRC" > "$tmp"
+        mv "$tmp" "$EVILGINX_BLACKLIST"
+        ok "Blacklist updated ($(wc -l < "$EVILGINX_BLACKLIST") entries)"
+    else
+        info "Creating ${EVILGINX_BLACKLIST}…"
+        sort -u "$BLACKLIST_SRC" > "$EVILGINX_BLACKLIST"
+        ok "Blacklist created ($(wc -l < "$EVILGINX_BLACKLIST") entries)"
+    fi
+}
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 print_summary() {
@@ -401,6 +438,7 @@ main() {
     install_go
     install_node
     install_evilginx
+    apply_blacklist
     print_summary
 }
 
