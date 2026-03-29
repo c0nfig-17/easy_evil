@@ -167,7 +167,7 @@ run_checklist() {
         warn "${errors} checklist warning(s). Review before proceeding."
         echo
         read -rp "$(echo -e "${YELLOW}[?]${RESET} Continue anyway? [y/N] ")" answer
-        [[ "${answer,,}" == "y" ]] || fail "Aborted by user."
+        [[  "${answer,,}" == "y" ]] || fail "Aborted by user."
     else
         ok "All checklist items passed."
     fi
@@ -348,6 +348,8 @@ install_evilginx() {
         ok "Repository cloned to ${EVILGINX_DIR}"
     fi
 
+    patch_ioc_headers
+
     info "Building evilginx2 (make)…"
     set +o pipefail
     make -C "$EVILGINX_DIR" 2>&1 | while IFS= read -r line; do
@@ -371,6 +373,97 @@ install_evilginx() {
         ok "Binary ready at ${binary} (chmod 700)"
     else
         warn "Binary not found — check build output above"
+    fi
+}
+
+# =============================================================================
+# IOC PATCH — Remove X-Evilginx beacon headers from core/http_proxy.go
+#
+# The upstream kgretzky/evilginx2 source contains two obfuscated HTTP headers
+# that act as indicators of compromise (IOCs) detectable by blue teams:
+#
+#   IOC 1 — egg2/hg block:
+#     hg := []byte{0x94, 0xE1, 0x89, 0xBA, 0xA5, 0xA0, 0xAB, 0xA5, 0xA2, 0xB4}
+#     XOR-decrypted with 0xCC  =>  "X-Evilginx"
+#     req.Header.Set(string(hg), egg2)  =>  X-Evilginx: <req.Host>
+#
+#   IOC 2 — e/cantFindMe block:
+#     e := []byte{208, 165, 205, 254, 225, 228, 239, 225, 230, 240}
+#     XOR-decrypted with 0x88  =>  "X-Evilginx"
+#     req.Header.Set(string(e), e_host) + cantFindMe() helper
+#
+# This function surgically removes both blocks and the cantFindMe function
+# from core/http_proxy.go before the binary is compiled.
+# =============================================================================
+patch_ioc_headers() {
+    echo -e "\n${BOLD}━━━ IOC Patch — Removing X-Evilginx beacon headers ━━━━━━${RESET}"
+
+    local proxy_file="${EVILGINX_DIR}/core/http_proxy.go"
+
+    if [[ ! -f "$proxy_file" ]]; then
+        warn "core/http_proxy.go not found at ${proxy_file} — skipping IOC patch"
+        return
+    fi
+
+    python3 - "$proxy_file" <<'PYEOF'
+import sys, re
+
+filepath = sys.argv[1]
+with open(filepath, 'r') as f:
+    content = f.read()
+
+original = content
+
+# IOC 1a — remove: egg2 := req.Host  (telemetry variable for hg block)
+content = re.sub(r'[ \t]+egg2\s*:=\s*req\.Host[ \t]*\n', '', content)
+
+# IOC 1b — remove hg byte array + XOR decryption loop + X-Evilginx header set
+#   hg := []byte{0x94, 0xE1, ...}
+#   for n, b := range hg { hg[n] = b ^ 0xCC }
+#   req.Header.Set(string(hg), egg2)
+content = re.sub(
+    r'[ \t]+hg\s*:=\s*\[\]byte\{0x94,\s*0xE1[^\n]*\n'
+    r'(?:[ \t]*[^\n]*\n)*?'
+    r'[ \t]+req\.Header\.Set\(string\(hg\)[^\n]*\n',
+    '', content, flags=re.DOTALL)
+
+# IOC 2a — remove: e_host := req.Host  (telemetry variable for cantFindMe block)
+content = re.sub(r'[ \t]+e_host\s*:=\s*req\.Host[ \t]*\n', '', content)
+
+# IOC 2b — remove e byte array + XOR decryption loop + header set + cantFindMe call
+#   e := []byte{208, 165, ...}
+#   for n, b := range e { e[n] = b ^ 0x88 }
+#   req.Header.Set(string(e), e_host)
+#   p.cantFindMe(req, e_host)
+content = re.sub(
+    r'[ \t]+e\s*:=\s*\[\]byte\{208,\s*165[^\n]*\n'
+    r'(?:[ \t]*[^\n]*\n)*?'
+    r'[ \t]+p\.cantFindMe\([^\n]*\n',
+    '', content, flags=re.DOTALL)
+
+# IOC 2c — remove cantFindMe function definition
+#   func (p *HttpProxy) cantFindMe(req *http.Request, nothing_to_see_here string) {
+#       var b []byte = []byte("\x1dh\x003,)\",+=")
+#       for n, c := range b { b[n] = c ^ 0x45 }
+#       req.Header.Set(string(b), nothing_to_see_here)
+#   }
+content = re.sub(
+    r'\nfunc \(p \*HttpProxy\) cantFindMe\(.*?\n\}\n',
+    '\n', content, flags=re.DOTALL)
+
+if content != original:
+    with open(filepath, 'w') as f:
+        f.write(content)
+    sys.stdout.write('[+] X-Evilginx IOC beacon headers successfully removed\n')
+else:
+    sys.stdout.write('[*] No IOC patterns found — source may already be patched\n')
+PYEOF
+
+    local rc=$?
+    if [[ $rc -eq 0 ]]; then
+        ok "core/http_proxy.go patched (X-Evilginx IOC headers removed)"
+    else
+        warn "IOC patch encountered errors — verify ${proxy_file} manually"
     fi
 }
 
