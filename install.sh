@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Evilginx2 - Installation Script
+# Easy Evil - Evilginx2 Installation Script
+# by c0nfig17 | https://c0nfig17.com/
 # =============================================================================
 
 set -euo pipefail
@@ -28,14 +29,14 @@ require_root() {
 banner() {
     echo -e "${BOLD}${CYAN}"
     cat <<'EOF'
-  ███████╗██╗   ██╗██╗██╗      ██████╗ ██╗███╗   ██╗██╗  ██╗
-  ██╔════╝██║   ██║██║██║     ██╔════╝ ██║████╗  ██║╚██╗██╔╝
-  █████╗  ██║   ██║██║██║     ██║  ███╗██║██╔██╗ ██║ ╚███╔╝
-  ██╔══╝  ╚██╗ ██╔╝██║██║     ██║   ██║██║██║╚██╗██║ ██╔██╗
-  ███████╗ ╚████╔╝ ██║███████╗╚██████╔╝██║██║ ╚████║██╔╝ ██╗
-  ╚══════╝  ╚═══╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝
+  ███████╗ █████╗ ███████╗██╗   ██╗    ███████╗██╗   ██╗██╗██╗
+  ██╔════╝██╔══██╗██╔════╝╚██╗ ██╔╝    ██╔════╝██║   ██║██║██║
+  █████╗  ███████║███████╗ ╚████╔╝     █████╗  ╚██╗ ██╔╝██║██║
+  ██╔══╝  ██╔══██║╚════██║  ╚██╔╝      ██╔══╝   ╚████╔╝ ██║██║
+  ███████╗██║  ██║███████║   ██║       ███████╗  ╚██╔╝  ██║███████╗
+  ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝       ╚══════╝   ╚═╝   ╚═╝╚══════╝
 EOF
-    echo -e "              Installer v1.0  —  Evilginx2${RESET}"
+    echo -e "          Installer v1.0  —  by c0nfig17  |  https://c0nfig17.com/${RESET}"
     echo
 }
 
@@ -46,17 +47,27 @@ run_checklist() {
     echo -e "\n${BOLD}━━━ Pre-flight Checklist ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     local errors=0
 
-    # 1. Disk space >= 1 GB
-    local available_kb
-    available_kb=$(df --output=avail / | tail -1)
-    if [[ $available_kb -ge 1048576 ]]; then
-        ok "Disk space OK ($(( available_kb / 1024 )) MB available)"
+    # 1. RAM >= 1 GB available
+    local ram_available_kb
+    ram_available_kb=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+    if [[ $ram_available_kb -ge 1048576 ]]; then
+        ok "RAM OK ($(( ram_available_kb / 1024 )) MB available)"
     else
-        warn "Less than 1 GB free disk space ($(( available_kb / 1024 )) MB)"
+        warn "Less than 1 GB RAM available ($(( ram_available_kb / 1024 )) MB)"
         (( errors++ )) || true
     fi
 
-    # 2. Ports 22 and 443 — warn only, never touch
+    # 2. Disk space >= 3 GB free on /
+    local available_kb
+    available_kb=$(df --output=avail / | tail -1)
+    if [[ $available_kb -ge 3145728 ]]; then
+        ok "Disk space OK ($(( available_kb / 1024 )) MB free on /)"
+    else
+        warn "Less than 3 GB free disk space ($(( available_kb / 1024 )) MB on /)"
+        (( errors++ )) || true
+    fi
+
+    # 3. Ports 22 and 443 — warn only, never touch
     for port in 22 443; do
         if ss -tlnp 2>/dev/null | grep -q ":${port} " || \
            ss -ulnp 2>/dev/null | grep -q ":${port} "; then
@@ -67,7 +78,7 @@ run_checklist() {
         fi
     done
 
-    # 3. Port 53 — auto-fix via systemd-resolved if occupied
+    # 4. Port 53 — auto-fix via systemd-resolved if occupied
     _check_port53() {
         ss -tlnp 2>/dev/null | grep -q ":53 " || \
         ss -ulnp 2>/dev/null | grep -q ":53 "
@@ -82,7 +93,6 @@ run_checklist() {
             info "Stopping and disabling systemd-resolved…"
             systemctl stop systemd-resolved
             systemctl disable systemd-resolved
-            # Give the port a moment to release
             sleep 1
             if _check_port53; then
                 warn "Port 53 still in use after stopping systemd-resolved"
@@ -98,13 +108,10 @@ run_checklist() {
         ok "Port 53 is free"
     fi
 
-    # 3. Non-root sudoer with authorized_keys
+    # 5. Non-root sudoer with authorized_keys
     local sudoer_ok=false
     while IFS=: read -r username _ uid _ _ homedir _; do
-        # Skip root and system accounts
         [[ $uid -lt 1000 || $username == "root" ]] && continue
-
-        # Check sudoers membership
         if id -nG "$username" 2>/dev/null | grep -qw "sudo\|wheel"; then
             local auth_keys="${homedir}/.ssh/authorized_keys"
             if [[ -s "$auth_keys" ]]; then
@@ -168,7 +175,6 @@ GO_BIN="${GO_INSTALL_DIR}/go/bin/go"
 install_go() {
     echo -e "\n${BOLD}━━━ Step 2/4 — Go ${GO_VERSION} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
-    # Check existing version
     if [[ -x "$GO_BIN" ]]; then
         local current
         current=$("$GO_BIN" version 2>/dev/null | awk '{print $3}' | sed 's/go//')
@@ -200,16 +206,14 @@ install_go() {
 
 _ensure_go_path() {
     local export_line='export PATH=$PATH:/usr/local/go/bin'
-    local target_rc
 
-    # Add to /etc/profile.d for system-wide availability (root install)
     local profile_d="/etc/profile.d/golang.sh"
     if [[ ! -f "$profile_d" ]] || ! grep -qF "$export_line" "$profile_d"; then
         echo "$export_line" >> "$profile_d"
         ok "Go PATH added to ${profile_d}"
     fi
 
-    # Also patch the invoking user's .bashrc if SUDO_USER is set
+    local target_rc
     if [[ -n "${SUDO_USER:-}" ]]; then
         target_rc=$(getent passwd "$SUDO_USER" | cut -d: -f6)/.bashrc
     else
@@ -234,7 +238,6 @@ NVM_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 install_node() {
     echo -e "\n${BOLD}━━━ Step 3/4 — Node.js ${NODE_VERSION} (nvm) ━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
-    # Determine the target user's home
     local target_user target_home
     if [[ -n "${SUDO_USER:-}" ]]; then
         target_user="$SUDO_USER"
@@ -250,7 +253,6 @@ install_node() {
         ok "nvm already installed at ${nvm_dir} — skipping download"
     else
         info "Installing nvm ${NVM_VERSION} for user '${target_user}'…"
-        # Run the nvm installer as the target user
         if [[ "$target_user" != "root" && -n "${SUDO_USER:-}" ]]; then
             sudo -u "$target_user" bash -c \
                 "curl -fsSL '${NVM_URL}' | NVM_DIR='${nvm_dir}' bash" 2>/dev/null
@@ -260,7 +262,6 @@ install_node() {
         ok "nvm installed"
     fi
 
-    # Helper: run a command inside nvm environment as target user
     _nvm_run() {
         local cmd="source '${nvm_dir}/nvm.sh' && $*"
         if [[ "$target_user" != "root" && -n "${SUDO_USER:-}" ]]; then
@@ -279,13 +280,14 @@ install_node() {
 }
 
 # =============================================================================
-# STEP 4 — Evilginx2
+# STEP 4 — Evilginx2  (cloned to /evilginx at filesystem root)
 # =============================================================================
 EVILGINX_REPO="https://github.com/kgretzky/evilginx2.git"
 EVILGINX_DIR="/evilginx"
 
 install_evilginx() {
     echo -e "\n${BOLD}━━━ Step 4/4 — Evilginx2 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    info "Install location: ${EVILGINX_DIR}  (filesystem root)"
 
     if [[ -d "${EVILGINX_DIR}/.git" ]]; then
         info "Repository already exists at ${EVILGINX_DIR} — pulling latest…"
@@ -294,7 +296,7 @@ install_evilginx() {
     else
         info "Cloning evilginx2 into ${EVILGINX_DIR}…"
         git clone -q "$EVILGINX_REPO" "$EVILGINX_DIR"
-        ok "Repository cloned"
+        ok "Repository cloned to ${EVILGINX_DIR}"
     fi
 
     info "Building evilginx2 (make)…"
@@ -303,9 +305,9 @@ install_evilginx() {
     done
     ok "Evilginx2 built successfully"
 
-    local binary="${EVILGINX_DIR}/evilginx"
-    if [[ ! -x "$binary" ]]; then
-        # Some builds output to build/
+    local binary="${EVILGINX_DIR}/build/evilginx"
+    if [[ ! -f "$binary" ]]; then
+        # Fallback: search up to 3 levels
         binary=$(find "$EVILGINX_DIR" -maxdepth 3 -name "evilginx" -type f | head -1)
     fi
 
@@ -323,12 +325,13 @@ install_evilginx() {
 print_summary() {
     echo
     echo -e "${BOLD}${GREEN}━━━ Installation Complete ━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "  ${GREEN}[+]${RESET} Go     : $(/usr/local/go/bin/go version 2>/dev/null || echo 'check manually')"
-    echo -e "  ${GREEN}[+]${RESET} Evilginx: ${EVILGINX_DIR}/evilginx"
+    echo -e "  ${GREEN}[+]${RESET} Go      : $(/usr/local/go/bin/go version 2>/dev/null || echo 'check manually')"
+    echo -e "  ${GREEN}[+]${RESET} Evilginx: ${EVILGINX_DIR}/build/evilginx"
     echo
-    echo -e "  ${CYAN}[*]${RESET} To start evilginx inside tmux:"
-    echo -e "       tmux new -s evilginx"
-    echo -e "       sudo ${EVILGINX_DIR}/evilginx -p ${EVILGINX_DIR}/phishlets"
+    echo -e "  ${CYAN}[*]${RESET} To start evilginx:"
+    echo -e "       ${BOLD}tmux a -t evilginx${RESET}          (reconnect to existing session)"
+    echo -e "       ${BOLD}cd /evilginx/build${RESET}"
+    echo -e "       ${BOLD}sudo ./evilginx -p ../phishlets/${RESET}"
     echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 

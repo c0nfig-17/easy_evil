@@ -1,4 +1,5 @@
-# easy_evil — Evilginx2 Installer
+# Easy Evil — Evilginx2 Installer
+**by c0nfig17 | [https://c0nfig17.com/](https://c0nfig17.com/)**
 
 Script de instalación automatizada para [evilginx2](https://github.com/kgretzky/evilginx2) en sistemas Debian/Ubuntu.
 
@@ -11,7 +12,8 @@ Script de instalación automatizada para [evilginx2](https://github.com/kgretzky
 | OS | Debian / Ubuntu (apt) |
 | Arquitectura | x86_64 (amd64) |
 | Acceso | root o sudo |
-| Disco libre | ≥ 1 GB |
+| RAM disponible | ≥ 1 GB |
+| Disco libre | ≥ 3 GB en `/` |
 | Puertos libres | 22, 53, 443 |
 
 ---
@@ -29,8 +31,10 @@ sudo ./install.sh
 
 ### Checklist previo
 Antes de instalar, verifica automáticamente:
-- **Disco** — al menos 1 GB disponible.
-- **Puertos** — 22, 53 y 443 libres.
+- **RAM** — al menos 1 GB disponible en memoria.
+- **Disco** — al menos 3 GB libres en `/`.
+- **Puertos 22 y 443** — solo advierte si están ocupados, nunca los toca.
+- **Puerto 53** — si está ocupado, para y deshabilita `systemd-resolved` automáticamente; si sigue ocupado tras eso, avisa para liberarlo a mano.
 - **Usuario sudo con SSH** — usuario no-root en el grupo `sudo`/`wheel` con `authorized_keys` configurado para login sin contraseña.
 
 Si alguna comprobación falla, se muestra una advertencia y se solicita confirmación para continuar.
@@ -49,20 +53,19 @@ Actualiza los repositorios e instala:
 - Instala y fija **Node.js 18** como versión por defecto.
 
 ### Paso 4 — Evilginx2
-- Clona el repositorio en `/evilginx` (o hace `git pull` si ya existe).
-- Compila con `make`.
+- Clona el repositorio en `/evilginx` (raíz del sistema de ficheros), o hace `git pull` si ya existe.
+- Compila con `make`. El binario queda en `/evilginx/build/evilginx`.
+- Aplica `chmod 700` al binario.
 
 ---
 
 ## Salida del script
 
-El script usa los siguientes prefijos:
-
 | Prefijo | Significado |
 |---------|-------------|
 | `[+]` | Paso completado con éxito |
 | `[*]` | Información / proceso en curso |
-| `[!]` | Advertencia (no bloquea, salvo errores graves) |
+| `[!]` | Advertencia (pide confirmación si hay problemas en el checklist) |
 | `[-]` | Error fatal — el script se detiene |
 
 ---
@@ -70,19 +73,16 @@ El script usa los siguientes prefijos:
 ## Iniciar evilginx tras la instalación
 
 ```bash
-# Abre una sesión tmux para dejar evilginx corriendo en segundo plano
-tmux new -s evilginx
+# Reconectar a la sesión tmux (o crear una nueva: tmux new -s evilginx)
+tmux a -t evilginx
 
 # Dentro de tmux:
-sudo /evilginx/evilginx -p /evilginx/phishlets
+cd /evilginx/build
+sudo ./evilginx -p ../phishlets/
 
 # Para desconectarte sin detener el proceso: Ctrl+B, luego D
-# Para volver a la sesión: tmux attach -t evilginx
 ```
 
 ---
 
-## Aviso legal
-
-Esta herramienta es para uso exclusivo en entornos **autorizados** (pentesting, red team, CTF, investigación de seguridad).
-El uso no autorizado contra sistemas ajenos es ilegal.
+> **Hint:** Esta herramienta es para uso exclusivo en entornos **autorizados** (pentesting, red team, CTF, investigación de seguridad). El uso no autorizado contra sistemas ajenos es ilegal.
