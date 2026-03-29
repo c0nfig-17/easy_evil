@@ -50,7 +50,7 @@ _fix_resolv_conf() {
     # If /etc/resolv.conf only has 127.0.0.x nameservers (systemd stub) and
     # systemd-resolved is not running, DNS is broken — write real nameservers.
     if grep -qE '^nameserver\s+127\.' /etc/resolv.conf 2>/dev/null && \
-       ! grep -qE '^nameserver\s+(?!127\.)' /etc/resolv.conf 2>/dev/null && \
+       ! grep -qP '^nameserver\s+(?!127\.)' /etc/resolv.conf 2>/dev/null && \
        ! systemctl is-active --quiet systemd-resolved 2>/dev/null; then
         info "Detected broken DNS (resolv.conf points to stopped stub resolver)"
         info "Writing fallback nameservers to /etc/resolv.conf…"
