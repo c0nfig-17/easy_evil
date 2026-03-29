@@ -56,9 +56,8 @@ run_checklist() {
         (( errors++ )) || true
     fi
 
-    # 2. Ports 22, 53, 443
-    local ports=(22 53 443)
-    for port in "${ports[@]}"; do
+    # 2. Ports 22 and 443 — warn only, never touch
+    for port in 22 443; do
         if ss -tlnp 2>/dev/null | grep -q ":${port} " || \
            ss -ulnp 2>/dev/null | grep -q ":${port} "; then
             warn "Port ${port} is already in use"
@@ -67,6 +66,37 @@ run_checklist() {
             ok "Port ${port} is free"
         fi
     done
+
+    # 3. Port 53 — auto-fix via systemd-resolved if occupied
+    _check_port53() {
+        ss -tlnp 2>/dev/null | grep -q ":53 " || \
+        ss -ulnp 2>/dev/null | grep -q ":53 "
+    }
+
+    if _check_port53; then
+        info "Port 53 is in use. Identifying process…"
+        lsof -i :53 2>/dev/null || true
+        netstat -tulnp 2>/dev/null | grep ":53" || true
+
+        if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+            info "Stopping and disabling systemd-resolved…"
+            systemctl stop systemd-resolved
+            systemctl disable systemd-resolved
+            # Give the port a moment to release
+            sleep 1
+            if _check_port53; then
+                warn "Port 53 still in use after stopping systemd-resolved"
+                (( errors++ )) || true
+            else
+                ok "Port 53 freed (systemd-resolved stopped and disabled)"
+            fi
+        else
+            warn "Port 53 is in use by a non-systemd-resolved process — free it manually"
+            (( errors++ )) || true
+        fi
+    else
+        ok "Port 53 is free"
+    fi
 
     # 3. Non-root sudoer with authorized_keys
     local sudoer_ok=false
