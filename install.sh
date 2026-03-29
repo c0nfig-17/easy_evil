@@ -272,9 +272,9 @@ install_node() {
     }
 
     info "Installing Node.js ${NODE_VERSION}…"
-    _nvm_run "nvm install ${NODE_VERSION} 2>/dev/null"
-    _nvm_run "nvm use ${NODE_VERSION} 2>/dev/null"
-    _nvm_run "nvm alias default ${NODE_VERSION} 2>/dev/null"
+    _nvm_run "nvm install ${NODE_VERSION}"
+    _nvm_run "nvm use ${NODE_VERSION}"
+    _nvm_run "nvm alias default ${NODE_VERSION}"
     ok "Node.js $(_nvm_run "node -v" 2>/dev/null) installed"
     ok "npm $(_nvm_run "npm -v" 2>/dev/null) installed"
 }
@@ -300,9 +300,15 @@ install_evilginx() {
     fi
 
     info "Building evilginx2 (make)…"
+    set +o pipefail
     make -C "$EVILGINX_DIR" 2>&1 | while IFS= read -r line; do
         echo -e "    ${CYAN}│${RESET} ${line}"
     done
+    local make_status=${PIPESTATUS[0]}
+    set -o pipefail
+    if [[ $make_status -ne 0 ]]; then
+        fail "make failed with exit code ${make_status}"
+    fi
     ok "Evilginx2 built successfully"
 
     local binary="${EVILGINX_DIR}/build/evilginx"
