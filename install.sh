@@ -430,8 +430,10 @@ content = re.sub(
 
 # Remove X-Evilginx header injection via p.getHomeDir()
 content = re.sub(r'[ \t]+req\.Header\.Set\(p\.getHomeDir\(\)[^\n]*\n', '', content)
-# Remove associated o_host variable if it's now unused
-content = re.sub(r'[ \t]+o_host\s*:=[^\n]*\n', '', content)
+
+# Only remove the o_host declaration if it's now truly unused
+if not re.search(r'\bo_host\b', content):
+    content = re.sub(r'[ \t]+o_host\s*:=[^\n]*\n', '', content)
 
 if content != original:
     with open(filepath, 'w') as f:
